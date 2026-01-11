@@ -1,0 +1,357 @@
+// PulseGym Database Schema
+// Multi-tenant gym management system
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// CORE ENTITIES
+// ===========================================
+
+model Gym {
+  id            String   @id @default(uuid())
+  name          String
+  city          String
+  businessModel BusinessModel @default(monthly)
+  isDemo        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  gymUsers        GymUser[]
+  members         Member[]
+  plans           Plan[]
+  memberships     Membership[]
+  invoices        Invoice[]
+  payments        Payment[]
+  trainers        Trainer[]
+  classes         Class[]
+  classAttendance ClassAttendance[]
+  auditLogs       AuditLog[]
+
+  @@map("gyms")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  gymUsers          GymUser[]
+  collectedPayments Payment[]
+  markedAttendance  ClassAttendance[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model GymUser {
+  id        String     @id @default(uuid())
+  gymId     String
+  userId    String
+  role      Role       @default(staff)
+  status    UserStatus @default(active)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gymId, userId])
+  @@index([gymId])
+  @@index([userId])
+  @@map("gym_users")
+}
+
+// ===========================================
+// MEMBER MANAGEMENT
+// ===========================================
+
+model Member {
+  id        String       @id @default(uuid())
+  gymId     String
+  fullName  String
+  phone     String?
+  email     String?
+  status    MemberStatus @default(active)
+  notes     String?
+  isDemo    Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  gym             Gym               @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberships     Membership[]
+  invoices        Invoice[]
+  classAttendance ClassAttendance[]
+
+  @@index([gymId, status])
+  @@index([gymId, deletedAt])
+  @@map("members")
+}
+
+model Plan {
+  id            String        @id @default(uuid())
+  gymId         String
+  name          String
+  billingPeriod BillingPeriod @default(monthly)
+  priceCents    Int
+  currency      String        @default("TRY")
+  durationDays  Int           @default(30)
+  isActive      Boolean       @default(true)
+  isDemo        Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@index([gymId, isActive])
+  @@map("plans")
+}
+
+model Membership {
+  id          String           @id @default(uuid())
+  gymId       String
+  memberId    String
+  planId      String
+  startDate   DateTime
+  endDate     DateTime
+  status      MembershipStatus @default(active)
+  nextDueDate DateTime?
+  isDemo      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  gym      Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member   Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  plan     Plan      @relation(fields: [planId], references: [id])
+  invoices Invoice[]
+
+  @@index([gymId, memberId, status])
+  @@index([gymId, endDate])
+  @@map("memberships")
+}
+
+// ===========================================
+// PAYMENTS & INVOICES
+// ===========================================
+
+model Invoice {
+  id           String        @id @default(uuid())
+  gymId        String
+  memberId     String
+  membershipId String?
+  amountCents  Int
+  currency     String        @default("TRY")
+  dueDate      DateTime
+  status       InvoiceStatus @default(due)
+  isDemo       Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  gym        Gym         @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member     Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  membership Membership? @relation(fields: [membershipId], references: [id])
+  payments   Payment[]
+
+  @@index([gymId, status, dueDate])
+  @@index([gymId, memberId])
+  @@map("invoices")
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  gymId             String
+  invoiceId         String
+  collectedByUserId String
+  amountCents       Int
+  method            PaymentMethod @default(cash)
+  note              String?
+  idempotencyKey    String        @unique
+  collectedAt       DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  gym         Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+  collectedBy User    @relation(fields: [collectedByUserId], references: [id])
+
+  @@index([gymId, collectedAt])
+  @@index([idempotencyKey])
+  @@map("payments")
+}
+
+// ===========================================
+// TRAINERS & CLASSES
+// ===========================================
+
+model Trainer {
+  id        String    @id @default(uuid())
+  gymId     String
+  fullName  String
+  phone     String?
+  email     String?
+  specialty String?
+  isDemo    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Relations
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  classes Class[]
+
+  @@index([gymId, deletedAt])
+  @@map("trainers")
+}
+
+model Class {
+  id          String    @id @default(uuid())
+  gymId       String
+  title       String
+  trainerId   String?
+  startTime   DateTime
+  endTime     DateTime
+  capacity    Int?
+  description String?
+  isDemo      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Relations
+  gym        Gym               @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  trainer    Trainer?          @relation(fields: [trainerId], references: [id])
+  attendance ClassAttendance[]
+
+  @@index([gymId, startTime])
+  @@index([gymId, deletedAt])
+  @@map("classes")
+}
+
+model ClassAttendance {
+  id             String           @id @default(uuid())
+  gymId          String
+  classId        String
+  memberId       String
+  status         AttendanceStatus @default(registered)
+  markedByUserId String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  // Relations
+  gym      Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  class    Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  member   Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  markedBy User?   @relation(fields: [markedByUserId], references: [id])
+
+  @@unique([classId, memberId])
+  @@index([gymId, classId])
+  @@map("class_attendance")
+}
+
+// ===========================================
+// AUDIT LOGGING
+// ===========================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  gymId       String
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  gym   Gym   @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  // Audit logs are immutable - no updatedAt
+  @@index([gymId, createdAt])
+  @@index([gymId, action])
+  @@index([gymId, entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ===========================================
+// ENUMS
+// ===========================================
+
+enum BusinessModel {
+  monthly
+  pt
+  class_based
+}
+
+enum Role {
+  owner
+  admin
+  manager
+  staff
+  trainer
+  viewer
+}
+
+enum UserStatus {
+  active
+  invited
+  suspended
+}
+
+enum MemberStatus {
+  active
+  frozen
+  expired
+}
+
+enum MembershipStatus {
+  active
+  expired
+  frozen
+}
+
+enum BillingPeriod {
+  monthly
+  weekly
+  session_pack
+}
+
+enum InvoiceStatus {
+  due
+  paid
+  void
+}
+
+enum PaymentMethod {
+  cash
+  card
+  transfer
+  other
+}
+
+enum AttendanceStatus {
+  registered
+  attended
+  no_show
+  cancelled
+}
